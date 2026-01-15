@@ -1,0 +1,9 @@
+{
+    "mcpServers": {
+        "elastic-cloud-billing": {
+            "type": "stdio",
+            "command": "uv",
+            "args": ["--directory", "./", "run", "server.py"]
+        }
+    }
+}

@@ -1,0 +1,10 @@
+[project]
+name = "elastic-cloud-billing"
+version = "0.1.0"
+description = "Minimal Model Context Protocol (MCP) server exposing Elastic Cloud billing/usage data for LLM tooling."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "fastmcp>=2.14.3",
+    "python-dotenv>=1.2.1",
+]
