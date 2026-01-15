@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 from typing import Any
 
 import httpx
+from async_lru import alru_cache
 
 from config import settings
 
@@ -71,6 +72,25 @@ class ElasticCloudClient:
             logger.error(f"Unexpected error for {endpoint}: {e!s}")
             raise
 
+    @alru_cache(maxsize=32)
+    async def _cached_billing_request(
+        self, 
+        endpoint: str, 
+        startdate_iso: str | None=None, 
+        enddate_iso: str | None=None, 
+        org_id: str | None=None
+        ) -> dict[str, Any]:
+        """Make authenticated request to Elastic Cloud Billing API with caching."""
+        params = {}
+        if startdate_iso:
+            params["from"] = startdate_iso
+        if enddate_iso:
+            params["to"] = enddate_iso
+        if org_id:
+            params["organization_id"] = org_id
+      
+        return await self._make_billing_request(endpoint, params)
+
     async def _make_billing_request(
         self, endpoint: str, params: dict | None = None
     ) -> dict[str, Any]:
@@ -98,32 +118,34 @@ class ElasticCloudClient:
 
     async def get_deployments(self) -> list[dict[str, Any]]:
         """Get all deployments for the organization."""
+        return await self._get_deployments_cached(self.org_id)
+
+    @alru_cache(maxsize=32, ttl=300)
+    async def _get_deployments_cached(self, org_id: str) -> list[dict[str, Any]]:
+        """Get all deployments for the organization with caching."""
         endpoint = "/api/v1/deployments"
-        params = {"q": f"organization_id:{self.org_id}"}
+        params = {"q": f"organization_id:{org_id}"}
         return await self._make_request(endpoint, params)
 
+    @alru_cache(maxsize=32, ttl=300)
     async def get_deployment(self, deployment_id: str) -> dict[str, Any]:
         """Get specific deployment details."""
         endpoint = f"/api/v1/deployments/{deployment_id}"
         return await self._make_request(endpoint)
 
+    # Get billing data methods
     async def get_instances_costs(
         self, start_date: datetime, end_date: datetime
     ) -> dict[str, Any]:
         """Get costs associated with all instances for date range."""
         endpoint = f"/api/v2/billing/organizations/{self.org_id}/costs/instances"
 
-        # Convert to UTC for API
-        start_utc = start_date.astimezone(ZoneInfo("UTC"))
-        end_utc = end_date.astimezone(ZoneInfo("UTC"))
-
-        params = {
-            "from": start_utc.isoformat(),
-            "to": end_utc.isoformat(),
-            "organization_id": self.org_id,
-        }
-
-        return await self._make_billing_request(endpoint, params)
+        return await self._cached_billing_request(
+            endpoint, 
+            startdate_iso=start_date.astimezone(ZoneInfo("UTC")).isoformat(),
+            enddate_iso=end_date.astimezone(ZoneInfo("UTC")).isoformat(),
+            org_id=self.org_id
+        )
 
     async def get_instance_costs(
         self, start_date: datetime, end_date: datetime, instance_id: str
@@ -131,17 +153,12 @@ class ElasticCloudClient:
         """Get costs associated to a set of items billed for a single instance for date range."""
         endpoint = f"/api/v2/billing/organizations/{self.org_id}/costs/instances/{instance_id}/items"
 
-        # Convert to UTC for API
-        start_utc = start_date.astimezone(ZoneInfo("UTC"))
-        end_utc = end_date.astimezone(ZoneInfo("UTC"))
-
-        params = {
-            "from": start_utc.isoformat(),
-            "to": end_utc.isoformat(),
-            "organization_id": self.org_id,
-        }
-
-        return await self._make_billing_request(endpoint, params)
+        return await self._cached_billing_request(
+            endpoint, 
+            startdate_iso=start_date.astimezone(ZoneInfo("UTC")).isoformat(),
+            enddate_iso=end_date.astimezone(ZoneInfo("UTC")).isoformat(),
+            org_id=self.org_id
+        )
 
     async def get_items_costs(
         self, start_date: datetime, end_date: datetime
@@ -149,13 +166,9 @@ class ElasticCloudClient:
         """Get costs for specific deployment."""
         endpoint = f"/api/v2/billing/organizations/{self.org_id}/costs/items"
 
-        start_utc = start_date.astimezone(ZoneInfo("UTC"))
-        end_utc = end_date.astimezone(ZoneInfo("UTC"))
-
-        params = {
-            "from": start_utc.isoformat(),
-            "to": end_utc.isoformat(),
-            "organization_id": self.org_id,
-        }
-
-        return await self._make_billing_request(endpoint, params)
+        return await self._cached_billing_request(
+            endpoint, 
+            startdate_iso=start_date.astimezone(ZoneInfo("UTC")).isoformat(),
+            enddate_iso=end_date.astimezone(ZoneInfo("UTC")).isoformat(),
+            org_id=self.org_id
+        )
