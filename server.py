@@ -78,13 +78,13 @@ async def get_deployment(deployment_id: str) -> dict:
 
 
 @auto_doc_mcp_tool()
-async def get_items_costs(start_date: datetime, end_date: datetime) -> dict:
+async def get_items_costs(start_date: datetime, end_date: datetime, organization_id: str) -> dict:
     """Get costs broken down by environment/deployment."""
     try:
         logger.info(
             f"Getting items costs for date range from {start_date} to {end_date}"
         )
-        result = await elastic_client.get_items_costs(start_date, end_date)
+        result = await elastic_client.get_items_costs(start_date, end_date, organization_id)
         return result
     except Exception as e:
         logger.error(f"Failed to get items costs: {e!s}")
@@ -92,12 +92,20 @@ async def get_items_costs(start_date: datetime, end_date: datetime) -> dict:
             "error": f"Failed to get items costs: {e!s}",
             "start_date": start_date,
             "end_date": end_date,
+            "organization_id": organization_id,
         }
 
 
 @auto_doc_mcp_tool()
-async def get_instances_costs(start_date: datetime, end_date: datetime) -> dict:
+async def get_instances_costs(start_date: datetime, end_date: datetime, organization_id: str) -> dict:
     """Get costs associated with all instances for date range.
+
+        Args:
+        start_date: The start date of the time period if this is more than 4 months from end date the api will fail,
+            reduce this to 4 months and repeat the call for the rest of the period.
+        end_date: The end date of the time period if this is more than 4 months from start date the api will fail, 
+            reduce this to 4 months and repeat the call for the rest of the period.
+        organization_id: The id of the organization the instance belongs to. (use account id if this is not provided by the user)
 
         Limitations:
             The period that api works for is up to 140 days.
@@ -108,7 +116,7 @@ async def get_instances_costs(start_date: datetime, end_date: datetime) -> dict:
         logger.info(
             f"Getting instances costs for date range from {start_date} to {end_date}"
         )
-        result = await elastic_client.get_instances_costs(start_date, end_date)
+        result = await elastic_client.get_instances_costs(start_date, end_date, organization_id)
         return result
     except Exception as e:
         logger.error(f"Failed to get instances costs: {e!s}")
@@ -116,13 +124,14 @@ async def get_instances_costs(start_date: datetime, end_date: datetime) -> dict:
             "error": f"Failed to get instances costs: {e!s}",
             "start_date": start_date,
             "end_date": end_date,
+            "organization_id": organization_id,
         }
 
 
 
 @auto_doc_mcp_tool()
 async def get_instance_costs(
-    start_date: datetime, end_date: datetime, instance_id: str
+    start_date: datetime, end_date: datetime, instance_id: str, organization_id: str
 ) -> dict:
     """Get costs associated to a set of items billed for a single instance for date range.
     Suggested Usage:
@@ -141,13 +150,14 @@ async def get_instance_costs(
         end_date: The end date of the time period if this is more than 12 months from start date the api will fail, 
             reduce this to 12 months and repeat the call for the rest of the period.
         instance_id: The id of the instance or environment can be found from the get_deployments tool and is the cluster id.
+        organization_id: The id of the organization the instance belongs to. (use account id if this is not provided by the user)
     """
     try:
         logger.info(
             f"Getting instance costs for date range from {start_date} to {end_date} for instance {instance_id}"
         )
         result = await elastic_client.get_instance_costs(
-            start_date, end_date, instance_id
+            start_date, end_date, organization_id, instance_id
         )
         # logger.info(f"Instance costs: {result}")
         return result
@@ -163,10 +173,10 @@ async def get_instance_costs(
 
 @mcp.tool(description="Total cost of an environment for a given time period")
 async def get_environment_cost(
-    start_date: datetime, end_date: datetime, instance_id: str
+    start_date: datetime, end_date: datetime, instance_id: str, organization_id: str
 ) -> dict:
-    """Total cost of an environment for a given time period"""
-    result = await elastic_client.get_instance_costs(start_date, end_date, instance_id)
+    """Total cost of an environment/instance for a given time period (only returns total_ecu to reduce context size)"""
+    result = await elastic_client.get_instance_costs(start_date, end_date, instance_id, organization_id)
     if result.get("total_ecu"):
         return {
             "total_ecu": result.get("total_ecu"),
@@ -203,7 +213,7 @@ async def get_current_account() -> dict:
     return {
         "account": elastic_client.account,
         "org_id": elastic_client.org_id,
-        "api_key_prefix": elastic_client.api_key[:10] + "..."
+        "api_key_prefix": elastic_client.api_key[:6] + "..."
         if elastic_client.api_key
         else None,
     }
@@ -213,6 +223,56 @@ async def get_current_account() -> dict:
 async def list_accounts() -> dict:
     """List all available accounts based on .env files in configured accounts directory."""
     return available_accounts()
+
+
+@auto_doc_mcp_tool()
+async def get_organizations() -> dict:
+    """Get the list of organizations the active apikey can get info from."""
+    try:
+        logger.info("Getting list of organizations")
+        result = await elastic_client.get_organizations()
+        logger.info(
+            f"Successfully retrieved {len(result.get('organizations', []))} organizations"
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Failed to get list of organizations: {e!s}")
+        return {
+            "error": f"Failed to get list of organizations: {e!s}",
+        }
+
+
+@auto_doc_mcp_tool()
+async def get_organization_members(org_id: str | None = None) -> dict:
+    """Get members of the specified organization. If no org_id is provided, use the current org_id."""
+    try:
+        logger.info(f"Getting members for organization {org_id or elastic_client.org_id}")
+        result = await elastic_client.get_organization_members(org_id)
+        logger.info(
+            f"Successfully retrieved {len(result.get('members', []))} members for organization {org_id or elastic_client.org_id}"
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Failed to get organization members: {e!s}")
+        return {
+            "error": f"Failed to get organization members: {e!s}",
+            "org_id": org_id,
+        }
+    
+@auto_doc_mcp_tool()
+async def get_account_info() -> dict:
+    """Get account information for the current API key.
+    Can be used to verify which account the key belongs to (is also the base org_id for the account)."""
+    try:
+        logger.info("Getting account information")
+        result = await elastic_client.get_account_info()
+        logger.info(f"Successfully retrieved account information")
+        return result
+    except Exception as e:
+        logger.error(f"Failed to get account information: {e!s}")
+        return {
+            "error": f"Failed to get account information: {e!s}",
+        }
 
 
 if __name__ == "__main__":
